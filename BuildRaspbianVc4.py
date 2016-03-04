@@ -13,6 +13,9 @@ import os
 import subprocess
 import re
 import json
+import sys
+
+INSTALL_PREFIX = "/var/tmp/vc4"
 
 LINUX_GIT_REPO_2708 = "https://github.com/raspberrypi/linux.git"
 # rpi-4.1.y has all the latest vc4 bits, and ships with current Raspbian
@@ -22,9 +25,6 @@ LINUX_GIT_BRANCH_2709 = "rpi-4.1.y"
 MESA_GIT_REPO = "git://anongit.freedesktop.org/mesa/mesa"
 # or "11.1" for the current stable branch
 MESA_GIT_BRANCH = "master"
-PROCESSING_GIT_REPO = "https://github.com/processing/processing.git"
-PROCESSING_GIT_BRANCH = "master"
-PROCESSING_VERSION = "3.0.1"
 XSERVER_GIT_REPO = "git://anongit.freedesktop.org/xorg/xserver"
 XSERVER_GIT_BRANCH = "master"
 DATA_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -47,7 +47,7 @@ def checkRoot():
 		exit("You need to have root privileges to run this script")
 
 def updateHostApt():
-	subprocess.check_call("apt-get -y update", shell=True)
+	subprocess.check_call("pacman -Syyu --needed --noconfirm abs base-devel git python2-virtualenv", shell=True)
 
 def updateFirmware():
 	# mask_gpu_interrupt0 gets obsoleted by a post-Jesse firmware update
@@ -108,7 +108,7 @@ def enableCoredumps():
 
 def enableDebugEnvVars():
 	# MESA_DEBUG macro needs this library for texture compression
-	subprocess.check_call("apt-get -y install libtxc-dxtn-s2tc0", shell=True)
+	#subprocess.check_call("apt-get -y install libtxc-dxtn-s2tc0", shell=True)
 	out = "export LIBGL_DEBUG=1\n"
 	out += "export MESA_DEBUG=1\n"
 	out += "export EGL_LOG_LEVEL=debug\n"
@@ -139,12 +139,13 @@ def getGitInfo():
 	return info
 
 def buildXorgMacros():
-	subprocess.check_call("apt-get -y install autoconf", shell=True)
+	#subprocess.check_call("apt-get -y install autoconf", shell=True)
 	if not os.path.exists("/usr/local/src/xorg-macros"):
 		subprocess.check_call("git clone git://anongit.freedesktop.org/xorg/util/macros /usr/local/src/xorg-macros", shell=True)
 	os.chdir("/usr/local/src/xorg-macros")
 	subprocess.call("git pull", shell=True)
-	subprocess.check_call("ACLOCAL_PATH=/usr/local/share/aclocal ./autogen.sh --prefix=/usr/local", shell=True)
+	subprocess.call("virtualenv2 my_env", shell=True)
+	subprocess.check_call("source my_env/bin/activate; PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ACLOCAL_PATH=/usr/local/share/aclocal ./autogen.sh --prefix=/usr/local", shell=True)
 	# has no make all, make clean
 	subprocess.check_call("make install", shell=True)
 	# move .pc file to standard path
@@ -157,26 +158,29 @@ def buildXcbProto():
 		subprocess.check_call("git clone git://anongit.freedesktop.org/xcb/proto /usr/local/src/xcb-proto", shell=True)
 	os.chdir("/usr/local/src/xcb-proto")
 	subprocess.call("git pull", shell=True)
-	subprocess.check_call("ACLOCAL_PATH=/usr/local/share/aclocal ./autogen.sh --prefix=/usr/local", shell=True)
-	subprocess.check_call("make " + MAKE_OPTS, shell=True)
+	subprocess.call("virtualenv2 my_env", shell=True)
+	subprocess.check_call("source my_env/bin/activate; PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ACLOCAL_PATH=/usr/local/share/aclocal ./autogen.sh --prefix=/usr/local", shell=True)
+	subprocess.check_call("source my_env/bin/activate; make " + MAKE_OPTS, shell=True)
 	subprocess.check_call("make install", shell=True)
 	if CLEANUP:
-		subprocess.check_call("make clean", shell=True)
+		subprocess.check_call("source my_env/bin/activate; make clean", shell=True)
 	issue['xcb-proto'] = getGitInfo()
 
 def buildLibXcb():
 	# needed to prevent xcb_poll_for_special_event linker error when installing mesa
-	subprocess.check_call("apt-get -y install libtool libpthread-stubs0-dev libxau-dev", shell=True)
+	subprocess.check_call("pacman -S --needed --noconfirm libxau; echo 'use yaourt/pacaur to install 	libpthread-stubs'", shell=True) 
+	#subprocess.check_call("apt-get -y install libtool libpthread-stubs0-dev libxau-dev", shell=True)
 	if not os.path.exists("/usr/local/src/libxcb"):
 		subprocess.check_call("git clone git://anongit.freedesktop.org/xcb/libxcb /usr/local/src/libxcb", shell=True)
 	os.chdir("/usr/local/src/libxcb")
 	subprocess.call("git pull", shell=True)
 	# xorg-macros.m4 got installed outside of the regular search path of aclocal
-	subprocess.check_call("ACLOCAL_PATH=/usr/local/share/aclocal ./autogen.sh --prefix=/usr/local", shell=True)
-	subprocess.check_call("make " + MAKE_OPTS, shell=True)
-	subprocess.check_call("make install", shell=True)
+	subprocess.call("virtualenv2 my_env", shell=True)
+	subprocess.check_call("source my_env/bin/activate; PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ACLOCAL_PATH=/usr/local/share/aclocal ./autogen.sh --prefix=/usr/local", shell=True)
+	subprocess.check_call("source my_env/bin/activate; make " + MAKE_OPTS, shell=True)
+	subprocess.check_call("source my_env/bin/activate; make install", shell=True)
 	if CLEANUP:
-		subprocess.check_call("make clean", shell=True)
+		subprocess.check_call("source my_env/bin/activate; make clean", shell=True)
 	subprocess.check_call("ldconfig", shell=True)
 	issue['libxcb'] = getGitInfo()
 
@@ -531,56 +535,7 @@ def buildGstreamer():
 	subprocess.check_call("ldconfig", shell=True)
 
 def buildExtraProcessing():
-	subprocess.check_call("apt-get -y install ant", shell=True)
-	# Processing expects this directory to exist as as well
-	if not os.path.exists("/usr/local/src/processing-docs"):
-		subprocess.check_call("git clone https://github.com/processing/processing-docs.git /usr/local/src/processing-docs", shell=True)
-	os.chdir("/usr/local/src/processing-docs")
-	subprocess.call("git pull", shell=True)
-	if not os.path.exists("/usr/local/src/processing"):
-		subprocess.check_call("git clone " + PROCESSING_GIT_REPO + " /usr/local/src/processing", shell=True)
-	os.chdir("/usr/local/src/processing")
-	subprocess.check_call("git remote set-url origin " + PROCESSING_GIT_REPO, shell=True)
-	subprocess.call("git fetch", shell=True)
-	subprocess.check_call("git checkout -f -B " + PROCESSING_GIT_BRANCH + " origin/" + PROCESSING_GIT_BRANCH, shell=True)
-	os.chdir("/usr/local/src/processing/build")
-	# we could build Processing with a more recent Java version
-	subprocess.check_call("ant linux-build", shell=True)
-	# this also removes previous versions
-	subprocess.check_call("rm -rf /usr/local/lib/processing*", shell=True)
-	subprocess.check_call("mv linux/work /usr/local/lib/processing-" + PROCESSING_VERSION, shell=True)
-	subprocess.check_call("chown root:root -R /usr/local/lib/processing-" + PROCESSING_VERSION, shell=True)
-	subprocess.check_call("ln -sf processing-" + PROCESSING_VERSION + " /usr/local/lib/processing", shell=True)
-	subprocess.check_call("ln -sf /usr/local/lib/processing/processing /usr/local/bin/processing", shell=True)
-	subprocess.check_call("ln -sf /usr/local/lib/processing/processing-java /usr/local/bin/processing-java", shell=True)
-	subprocess.check_call("mkdir -p /usr/local/share/applications", shell=True)
-	subprocess.check_call("cp -f linux/processing.desktop /usr/local/share/applications", shell=True)
-	# update .desktop file
-	desktop = file_get_contents("/usr/local/share/applications/processing.desktop")
-	desktop = re.sub('@version@', PROCESSING_VERSION, desktop)
-	desktop = re.sub('/opt/processing', '/usr/local/lib/processing', desktop)
-	file_put_contents("/usr/local/share/applications/processing.desktop", desktop)
-	# inject nightly OpenJFX build (FX2D not working on Raspbian as of 3.0a9, stock or mesa)
-	# this also copies a gstreamer-lite.so btw
-	#subprocess.check_call("wget -q http://108.61.191.178/openjfx-8-sdk-overlay-linux-armv6hf.zip", shell=True)
-	#subprocess.check_call("mkdir openjfx", shell=True)
-	#os.chdir("/usr/local/src/processing/build/openjfx")
-	#subprocess.check_call("unzip ../openjfx-8-sdk-overlay-linux-armv6hf.zip", shell=True)
-	#subprocess.check_call("cp -rf jre/* /usr/local/lib/processing/java", shell=True)
-	#os.chdir("/usr/local/src/processing/build")
-	#subprocess.check_call("rm -rf openjfx*", shell=True)
-	# copy the simplevideo library
-	#subprocess.check_call("wget -q http://github.com/gohai/processing-simplevideo/archive/master.zip", shell=True)
-	#subprocess.check_call("unzip master.zip", shell=True)
-	#subprocess.check_call("mv processing-simplevideo-master /usr/local/lib/processing/modes/java/libraries/simplevideo", shell=True)
-	#subprocess.check_call("rm -f master.zip", shell=True)
-	# copy the test script
-	subprocess.check_call("cp -f " + DATA_DIR + "/processing-test3d.* /home/pi", shell=True)
-	subprocess.check_call("chown pi:pi /home/pi/processing-test3d.*", shell=True)
-	if CLEANUP:
-		subprocess.check_call("ant clean", shell=True)
-	# this is currently not working for some reason
-	issue['processing'] = getGitInfo()
+	subprocess.check_call("pacman -S --noconfirm --needed processing", shell=True)
 
 def buildExtraProcessingVideo():
 	if not os.path.exists("/usr/local/src/processing-video"):
@@ -605,21 +560,22 @@ def buildIssueJson():
 
 checkRoot()
 updateHostApt()
-updateFirmware()
+#updateFirmware()
 updateConfigTxt()
-updateLdConfig()
-enableCoredumps()
+#updateLdConfig()
+#enableCoredumps()
 # not needed anymore?
 #updateUdevGpioRule()
-updateRcLocalForLeds()
+#updateRcLocalForLeds()
 enableDebugEnvVars()
 # build Processing first since chances are that I screwed up somewhere
-buildExtraProcessing()
+#buildExtraProcessing()
 #buildExtraProcessingVideo()
 # mesa and friends
-buildXorgMacros()
-buildXcbProto()
+buildXorgMacros() #works
+buildXcbProto() # works
 buildLibXcb()
+sys.exit()
 buildGlProto()
 buildLibDrm()
 buildDri2Proto()
