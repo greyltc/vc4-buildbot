@@ -25,6 +25,9 @@ LINUX_GIT_BRANCH_2709 = "rpi-4.1.y"
 MESA_GIT_REPO = "git://anongit.freedesktop.org/mesa/mesa"
 # or "11.1" for the current stable branch
 MESA_GIT_BRANCH = "master"
+PROCESSING_GIT_REPO = "https://github.com/processing/processing.git"
+PROCESSING_GIT_BRANCH = "master"
+PROCESSING_VERSION = "3.0.1"
 XSERVER_GIT_REPO = "git://anongit.freedesktop.org/xorg/xserver"
 XSERVER_GIT_BRANCH = "master"
 DATA_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -535,7 +538,57 @@ def buildGstreamer():
 	subprocess.check_call("ldconfig", shell=True)
 
 def buildExtraProcessing():
-	subprocess.check_call("pacman -S --noconfirm --needed processing", shell=True)
+	subprocess.check_call("apt-get -y install ant", shell=True)
+	# Processing expects this directory to exist as as well
+	if not os.path.exists("/usr/local/src/processing-docs"):
+		subprocess.check_call("git clone https://github.com/processing/processing-docs.git /usr/local/src/processing-docs", shell=True)
+	os.chdir("/usr/local/src/processing-docs")
+	subprocess.call("git pull", shell=True)
+	if not os.path.exists("/usr/local/src/processing"):
+		subprocess.check_call("git clone " + PROCESSING_GIT_REPO + " /usr/local/src/processing", shell=True)
+	os.chdir("/usr/local/src/processing")
+	subprocess.check_call("git remote set-url origin " + PROCESSING_GIT_REPO, shell=True)
+	subprocess.call("git fetch", shell=True)
+	subprocess.check_call("git checkout -f -B " + PROCESSING_GIT_BRANCH + " origin/" + PROCESSING_GIT_BRANCH, shell=True)
+	os.chdir("/usr/local/src/processing/build")
+	# we could build Processing with a more recent Java version
+	subprocess.check_call("ant linux-build", shell=True)
+	# this also removes previous versions
+	subprocess.check_call("rm -rf /usr/local/lib/processing*", shell=True)
+	subprocess.check_call("mv linux/work /usr/local/lib/processing-" + PROCESSING_VERSION, shell=True)
+	subprocess.check_call("chown root:root -R /usr/local/lib/processing-" + PROCESSING_VERSION, shell=True)
+	subprocess.check_call("ln -sf processing-" + PROCESSING_VERSION + " /usr/local/lib/processing", shell=True)
+	subprocess.check_call("ln -sf /usr/local/lib/processing/processing /usr/local/bin/processing", shell=True)
+	subprocess.check_call("ln -sf /usr/local/lib/processing/processing-java /usr/local/bin/processing-java", shell=True)
+	subprocess.check_call("mkdir -p /usr/local/share/applications", shell=True)
+	subprocess.check_call("cp -f linux/processing.desktop /usr/local/share/applications", shell=True)
+	# update .desktop file
+	desktop = file_get_contents("/usr/local/share/applications/processing.desktop")
+	desktop = re.sub('@version@', PROCESSING_VERSION, desktop)
+	desktop = re.sub('/opt/processing', '/usr/local/lib/processing', desktop)
+	file_put_contents("/usr/local/share/applications/processing.desktop", desktop)
+	# inject nightly OpenJFX build (FX2D not working on Raspbian as of 3.0a9, stock or mesa)
+	# this also copies a gstreamer-lite.so btw
+	#subprocess.check_call("wget -q http://108.61.191.178/openjfx-8-sdk-overlay-linux-armv6hf.zip", shell=True)
+	#subprocess.check_call("mkdir openjfx", shell=True)
+	#os.chdir("/usr/local/src/processing/build/openjfx")
+	#subprocess.check_call("unzip ../openjfx-8-sdk-overlay-linux-armv6hf.zip", shell=True)
+	#subprocess.check_call("cp -rf jre/* /usr/local/lib/processing/java", shell=True)
+	#os.chdir("/usr/local/src/processing/build")
+	#subprocess.check_call("rm -rf openjfx*", shell=True)
+	# copy the simplevideo library
+	#subprocess.check_call("wget -q http://github.com/gohai/processing-simplevideo/archive/master.zip", shell=True)
+	#subprocess.check_call("unzip master.zip", shell=True)
+	#subprocess.check_call("mv processing-simplevideo-master /usr/local/lib/processing/modes/java/libraries/simplevideo", shell=True)
+	#subprocess.check_call("rm -f master.zip", shell=True)
+	# copy the test script
+	subprocess.check_call("cp -f " + DATA_DIR + "/processing-test3d.* /home/pi", shell=True)
+	subprocess.check_call("chown pi:pi /home/pi/processing-test3d.*", shell=True)
+	if CLEANUP:
+		subprocess.check_call("ant clean", shell=True)
+	# this is currently not working for some reason
+	issue['processing'] = getGitInfo()
+
 
 def buildExtraProcessingVideo():
 	if not os.path.exists("/usr/local/src/processing-video"):
@@ -572,11 +625,11 @@ enableDebugEnvVars()
 #buildExtraProcessing()
 #buildExtraProcessingVideo()
 # mesa and friends
-buildXorgMacros() #works
-buildXcbProto() # works
+buildXorgMacros()
+buildXcbProto()
 buildLibXcb()
-sys.exit()
 buildGlProto()
+sys.exit()
 buildLibDrm()
 buildDri2Proto()
 buildDri3Proto()
